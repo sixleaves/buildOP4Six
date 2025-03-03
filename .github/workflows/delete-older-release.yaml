@@ -10,7 +10,7 @@ jobs:
     # 添加权限声明
     permissions:
       actions: write  # 授予删除工作流运行的权限
-      contents: read  # 保持代码拉取权限（默认行为）
+      contents: write  # 保持代码拉取权限（默认行为）
     steps:
 
     - name: Delete a workflow
