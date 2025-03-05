@@ -2,7 +2,7 @@ name: build-ib-latest
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 14 * * *'
+    - cron: '0 14 16 * *'
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt.git
