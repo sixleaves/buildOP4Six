@@ -8,7 +8,7 @@ env:
   REPO_URL: https://github.com/sixleaves/buildOP4Six/releases/download
   REPO_IB: IB-N60Pro-latest
   IB_NAME: immortalwrt-imagebuilder-mediatek-mt7986.Linux-x86_64
-  DIY_FILES: arm64/21.02/files
+  DIY_FILES: files/arm64/21.02/files
   FIRMWARE_NAME: N60Pro
   ARCH: arm64
   TZ: Asia/Shanghai
