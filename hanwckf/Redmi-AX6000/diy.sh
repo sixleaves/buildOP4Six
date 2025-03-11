@@ -7,8 +7,6 @@
 #
 # Custom for REDMI AX6000
 sed -i 's/192.168.1.1/192.168.31.1/g' package/base-files/files/bin/config_generate
-ls target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7986a-xiaomi-redmi-router-ax6000.dtsi
-cp $GITHUB_WORKSPACE/hanwckf/Redmi-AX6000/data/mt7986a-xiaomi-redmi-router-ax6000.dtsi target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/
 cat > package/base-files/files/etc/banner << EOF
   _______                     ________        __
  |       |.-----.-----.-----.|  |  |  |.----.|  |_
