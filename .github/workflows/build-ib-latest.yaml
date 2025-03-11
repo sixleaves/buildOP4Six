@@ -6,7 +6,7 @@ on:
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt.git
-  CONFIG_FILE: .config_amd64
+  CONFIG_FILE: hanwckf/x86-64/x86-64.config
   REPO_NAME: immortalwrt
   FIRMWARE_NAME: IB
   TZ: Asia/Shanghai
@@ -86,10 +86,10 @@ jobs:
 
       - name: 6.加载配置文件
         run: |
-          ls -l x86-64/$CONFIG_FILE || echo "Config file not found"
-          ls -l x86-64/$CONFIG_FILE
-          if [ -e x86-64/$CONFIG_FILE ]; then
-            cp -rf x86-64/$CONFIG_FILE /workdir/$REPO_NAME/
+          ls -l $CONFIG_FILE || echo "Config file not found"
+          ls -l $CONFIG_FILE
+          if [ -e $CONFIG_FILE ]; then
+            cp -rf $CONFIG_FILE /workdir/$REPO_NAME/
             ls /workdir/$REPO_NAME/
             mv /workdir/$REPO_NAME/$CONFIG_FILE /workdir/$REPO_NAME/.config
           else
