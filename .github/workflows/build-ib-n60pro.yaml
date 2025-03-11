@@ -6,7 +6,7 @@ on:
 env:
   REPO_URL: https://github.com/hanwckf/immortalwrt-mt798x
   REPO_BRANCH: openwrt-21.02
-  CONFIG_FILE: n60_config
+  CONFIG_FILE: hanwckf/N60Pro/n60_config
   REPO_NAME: immortalwrt-mt798x
   DTS_PATH: target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/
   FIRMWARE_NAME: IB-N60Pro
@@ -66,9 +66,9 @@ jobs:
 
       - name: 6.加载配置文件
         run: |
-          ls -l hanwckf/n99-AX6000/n60_config || echo "Config file not found"
-          if [ -e hanwckf/n99-AX6000/n60_config ]; then
-            cp -f hanwckf/n99-AX6000/n60_config /workdir/$REPO_NAME/.config
+          ls -l $CONFIG_FILE || echo "Config file not found"
+          if [ -e $CONFIG_FILE ]; then
+            cp -f $CONFIG_FILE /workdir/$REPO_NAME/.config
             ls /workdir/$REPO_NAME/
           else
             echo "Config file $CONFIG_FILE not found. Exiting..."
