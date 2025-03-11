@@ -1,4 +1,4 @@
-name: build-x86-64-immortalwrt-23.05.4
+name: build-x86-64-op-23.05.4
 
 on:
   workflow_dispatch:

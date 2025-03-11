@@ -1,4 +1,4 @@
-name: Build Redmi AX6000 Firmware
+name: build-redmi-ax6000
 on:
   workflow_dispatch:
 
