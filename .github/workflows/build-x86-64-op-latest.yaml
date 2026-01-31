@@ -5,8 +5,13 @@ on:
     - cron: '0 16 * * *'
 
 env:
+  # IB 下载源设置 (来自 sixleaves/buildOP4Six)
+  IB_REPO: sixleaves/buildOP4Six
+  IB_TAG: IB-latest
+  # 固件基本信息
   FIRMWARE_NAME: immortalwrt
   TZ: Asia/Shanghai
+  # 自定义文件目录 (如果你仓库里有这个目录，里面的内容会被复制到固件根目录)
   DIY_FILES: files/x86-64/files
 
 jobs:
@@ -22,136 +27,125 @@ jobs:
       - name: 2. 获取上游版本信息
         id: get_version
         run: |
-          # 尝试获取官方最新 Tag
+          # 获取 ImmortalWrt 官方最新 Tag 作为版本号参考
           TAGS=$(curl -s https://api.github.com/repos/immortalwrt/immortalwrt/tags | jq -r '.[].name')
           LATEST_STABLE=$(echo "$TAGS" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -rV | head -n1)
           
-          # 如果获取失败，兜底使用 24.10.4
           if [ -z "$LATEST_STABLE" ]; then
-            echo "MAIN_VERSION=24.10.4" >> $GITHUB_ENV
+            echo "MAIN_VERSION=24.10-SNAPSHOT" >> $GITHUB_ENV
             echo "REPO_BRANCH=openwrt-24.10" >> $GITHUB_ENV
           else
-            VERSION_NUM=$(echo $LATEST_STABLE | sed 's/^v//')
-            echo "MAIN_VERSION=$VERSION_NUM" >> $GITHUB_ENV
-            MAJOR_VER=$(echo $VERSION_NUM | cut -d. -f1-2)
-            echo "REPO_BRANCH=openwrt-$MAJOR_VER" >> $GITHUB_ENV
+            MAIN_VERSION=$(echo $LATEST_STABLE | sed 's/v\([0-9]\+\.[0-9]\+\).*/\1/')
+            echo "MAIN_VERSION=$MAIN_VERSION" >> $GITHUB_ENV    
+            echo "REPO_BRANCH=openwrt-$MAIN_VERSION" >> $GITHUB_ENV
           fi
+          echo "Build Version: $MAIN_VERSION"
 
       - name: 3. 安装编译依赖
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt update
-          # 必须安装 zstd，因为新版 IB 通常是 .tar.zst 格式
+          # 增加 zstd 用于解压新版 IB，增加 parted 用于生成扩容脚本时的调试
           sudo apt install -y build-essential libncurses-dev zlib1g-dev gawk git gettext libssl-dev xsltproc rsync wget unzip python3 zstd parted
 
-      - name: 4. 下载官方 ImageBuilder
+      - name: 4. 下载并解压 ImageBuilder
         run: |
-          # 使用 KyaruCloud 镜像源
-          BASE_URL="https://immortalwrt.kyarucloud.moe/releases/${{ env.MAIN_VERSION }}/targets/x86/64/"
+          echo "正在从 $IB_REPO 下载 ImageBuilder..."
           
-          echo "正在从镜像站获取文件名列表: $BASE_URL"
+          # 模糊匹配下载 URL，因为文件名可能会变
+          # 使用 GitHub API 获取 release 资源列表
+          ASSET_URL=$(curl -s "https://api.github.com/repos/${{ env.IB_REPO }}/releases/tags/${{ env.IB_TAG }}" | jq -r '.assets[] | select(.name | contains("immortalwrt-imagebuilder-x86-64")) | .browser_download_url' | head -n 1)
           
-          # 【核心逻辑】不再瞎猜文件名，直接去网页上抓取
-          # 1. 下载网页内容
-          # 2. 匹配 immortalwrt-imagebuilder 开头，以 .tar.xz 或 .tar.zst 结尾的文件名
-          IB_FILENAME=$(curl -s "$BASE_URL" | grep -oE 'immortalwrt-imagebuilder-[^"]+\.tar\.(xz|zst)' | head -n 1)
-          
-          if [ -z "$IB_FILENAME" ]; then
-            echo "Error: 在镜像站找不到 ImageBuilder 文件！"
-            echo "请检查版本号 ${{ env.MAIN_VERSION }} 是否存在于 $BASE_URL"
+          if [ -z "$ASSET_URL" ]; then
+            echo "Error: Could not find ImageBuilder asset!"
             exit 1
           fi
           
-          echo "发现 ImageBuilder 文件: $IB_FILENAME"
-          DOWNLOAD_URL="${BASE_URL}${IB_FILENAME}"
+          echo "Downloading from: $ASSET_URL"
+          wget -q "$ASSET_URL" -O ib.tar.zst
           
-          echo "Downloading..."
-          wget -q "$DOWNLOAD_URL" -O ib.archive
-          
+          # 解压
           echo "Extracting..."
-          # 根据后缀自动选择解压方式
-          if [[ "$IB_FILENAME" == *".tar.zst" ]]; then
-            tar -I zstd -xf ib.archive
-          else
-            tar -xf ib.archive
-          fi
+          tar -I zstd -xf ib.tar.zst
+          rm ib.tar.zst
           
-          rm ib.archive
+          # 将解压出来的目录重命名为 ib_dir，方便后续操作
           mv immortalwrt-imagebuilder-* ib_dir
+          
+          # 验证是否解压成功
+          if [ ! -d "ib_dir" ]; then
+             echo "Error: Extraction failed or directory mismatch."
+             exit 1
+          fi
 
-      - name: 5. 注入自动化配置脚本
+      - name: 5. 注入自动扩容脚本与自定义配置
         run: |
+          # --- 核心：生成自动扩容脚本 (UCI Defaults) ---
+          # 该脚本会在固件首次启动时运行，扩容分区并重启
           mkdir -p ib_dir/files/etc/uci-defaults
           
-          # --- 脚本1: 99-resize-rootfs (自动扩容) ---
           cat << 'EOF' > ib_dir/files/etc/uci-defaults/99-resize-rootfs
           #!/bin/sh
+          
+          # 1. 找到主硬盘 (通常是 sdX 或 mmcblk0)
           disk=$(parted -l 2>/dev/null | grep -o '/dev/sd[a-z]' | head -n 1)
           [ -z "$disk" ] && disk="/dev/mmcblk0"
+          
+          # 如果找不到硬盘，退出
           [ -z "$disk" ] && exit 0
+          
+          # 2. 获取最后一个分区的编号
           part_num=$(parted "$disk" -ms unit s print | tail -n 1 | cut -f 1 -d:)
+          
+          # 3. 扩容该分区到 100%
           parted "$disk" -s resizepart "$part_num" 100%
+          
+          # 4. 尝试扩容文件系统 (兼容 ext4)
+          # 注意：OpenWrt 的 rootfs 扩容通常在重启后生效，这里作为双重保险
           resize2fs "${disk}${part_num}" 2>/dev/null || resize2fs "${disk}p${part_num}" 2>/dev/null
+          
+          # 5. 删除自身，防止重复运行
           rm -f /etc/uci-defaults/99-resize-rootfs
+          
+          # 6. 重启以让分区表变更生效
           reboot
           EOF
+          
           chmod +x ib_dir/files/etc/uci-defaults/99-resize-rootfs
+          echo "自动扩容脚本已注入。"
           
-          # --- 脚本2: 99-custom-settings (性能优化与网络设置) ---
-          cat << 'EOF' > ib_dir/files/etc/uci-defaults/99-custom-settings
-          #!/bin/sh
-          
-          # 1. 开启 BBR 拥塞控制 (提升网络吞吐)
-          echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
-          echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-          sysctl -p
-          
-          # 2. 设置默认 LAN IP (防止冲突)
-          uci set network.lan.ipaddr='192.168.31.1'
-          uci commit network
-          
-          # 3. 默认开启 TurboACC (如果安装了的话)
-          # ImmortalWrt 的 TurboACC 默认通常是开启 Flow Offload 的，这里确保一下
-          uci set firewall.@defaults[0].flow_offloading='1'
-          uci set firewall.@defaults[0].flow_offloading_hw='1' 2>/dev/null
-          uci commit firewall
-          
-          # 脚本执行完自动删除
-          rm -f /etc/uci-defaults/99-custom-settings
-          exit 0
-          EOF
-          chmod +x ib_dir/files/etc/uci-defaults/99-custom-settings
-
-          # 注入你的自定义文件 (如果有)
+          # --- 注入用户自定义文件 (如果有) ---
           if [ -d "${{ env.DIY_FILES }}" ]; then
+            echo "Copying custom files from ${{ env.DIY_FILES }}..."
             cp -r ${{ env.DIY_FILES }}/* ib_dir/files/
+          else
+            echo "No custom files found in ${{ env.DIY_FILES }}, skipping."
           fi
 
       - name: 6. 开始构建固件
         run: |
           cd ib_dir
+          echo -e "$(nproc) thread compile"
           
-          # 【重要修正】
-          # 1. 删除了 "custom-scripts"，因为我们现在是直接注入文件，不需要安装包
-          # 2. 保留了其他所有官方驱动和配置
+          # --- 构建命令说明 ---
+          # ROOTFS_PARTSIZE=1024: 初始根分区大小设为 1GB (下载快)，刷入后会自动扩容。
+          # PACKAGES: 
+          #   1. 必须包含: parted losetup resize2fs (用于扩容)
+          #   2. 已移除: -kmod-ixgbevf (防止冲突)
           
-          make image PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=1024 PACKAGES=" \
-          parted resize2fs \
-          luci-theme-argon luci-app-package-manager default-settings-chn \
-          -dnsmasq dnsmasq-full \
-          luci-app-turboacc include-pdnsd-ipv6 \
-          kmod-tcp-bbr \
-          kmod-nft-offload kmod-nft-tproxy kmod-sched-core kmod-sched-cake \
-          kmod-crypto-cbc kmod-crypto-ctr kmod-hwmon-core kmod-i2c-core \
-          rsync curl htop \
-          kmod-amazon-ena kmod-vmxnet3 kmod-dwmac-intel kmod-forcedeth kmod-r8169 \
-          kmod-e1000e kmod-i40e kmod-igb kmod-igbvf \
-          kmod-ixgbe kmod-ixgbevf kmod-pcnet32 kmod-tulip \
-          kmod-usb-hid kmod-ata-ahci"
+          make image PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=1024 PACKAGES="custom-scripts \
+          parted losetup resize2fs \
+          autocore automount base-files block-mount ca-bundle ca-certificates default-settings-chn dnsmasq-full dropbear fdisk firewall4 fstools \
+          kmod-button-hotplug kmod-nft-offload libc libgcc libustream-openssl logd luci-app-package-manager luci-compat luci-lib-base luci-lib-ipkg luci-light \
+          netifd nftables odhcp6c odhcpd-ipv6only opkg partx-utils ppp ppp-mod-pppoe procd-ujail uci kmod-nf-nathelper \
+          uclient-fetch urandom-seed urngd kmod-amazon-ena kmod-dwmac-intel kmod-forcedeth kmod-usb-hid i915-firmware-dmc \
+          luci-theme-argon kmod-nft-tproxy kmod-sched-core kmod-sched-cake kmod-crypto-cbc kmod-crypto-ctr kmod-ata-ahci kmod-drm-i915 \
+          kmod-hwmon-core kmod-i2c-core rsync curl htop kmod-e1000e kmod-i40e kmod-igb \
+          kmod-igbvf kmod-ixgbe kmod-ixgbevf kmod-pcnet32 kmod-tulip kmod-vmxnet3" 
           
-          echo "FILE_DATE=$(date +"%Y%m%d")" >> $GITHUB_ENV
-          echo "BUILD_TIME=$(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+          # 设置时间戳变量
+          echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
       - name: 7. 上传构建产物
         uses: actions/upload-artifact@v4
@@ -161,20 +155,22 @@ jobs:
 
       - name: 8. 生成 Release 信息
         run: |
+          echo "RELEASE_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
           echo "RELEASE_BODY<<EOF" >> $GITHUB_ENV
           echo "## ImmortalWrt x86-64 固件发布" >> $GITHUB_ENV
-          echo "- **版本**: ${{ env.MAIN_VERSION }}" >> $GITHUB_ENV
-          echo "- **构建时间**: ${{ env.BUILD_TIME }}" >> $GITHUB_ENV
-          echo "- **镜像源**: kyarucloud.moe" >> $GITHUB_ENV
+          echo "### 固件特性" >> $GITHUB_ENV
+          echo "- **自动扩容**: 首次启动后自动扩展以利用所有磁盘空间" >> $GITHUB_ENV
+          echo "- **内核版本**: ${{ env.REPO_BRANCH }}" >> $GITHUB_ENV
+          echo "- **构建时间**: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
           echo "### 默认配置" >> $GITHUB_ENV
-          echo "- IP: 192.168.31.1" >> $GITHUB_ENV
-          echo "- 密码: 无" >> $GITHUB_ENV
+          echo "- IP 地址: 192.168.31.1" >> $GITHUB_ENV
+          echo "- 密码: 无 (空)" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
       - name: 9. 发布 Release
         uses: ncipollo/release-action@v1
         with:
-          tag: "${{ env.FIRMWARE_NAME }}-${{ env.MAIN_VERSION }}-${{ env.FILE_DATE }}"
+          tag: "${{ env.FIRMWARE_NAME }}-${{ env.MAIN_VERSION }}-${{ env.RELEASE_DATE }}"
           artifacts: "ib_dir/bin/targets/x86/64/*"
           body: ${{ env.RELEASE_BODY }}
           allowUpdates: true
