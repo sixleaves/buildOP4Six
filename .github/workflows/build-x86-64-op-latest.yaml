@@ -130,7 +130,7 @@ jobs:
           # 3. 移除了 libc, libgcc, base-files 等基础包（ImageBuilder 默认会带，无需重复声明）
           # ---------------------------------------------------------------------
           
-          make image PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=1024 PACKAGES="custom-scripts \
+          make image V=s PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=1024 PACKAGES="custom-scripts \
           parted losetup resize2fs \
           -dnsmasq dnsmasq-full \
           autocore automount default-settings-chn dropbear fdisk firewall4 fstools \
