@@ -132,17 +132,16 @@ jobs:
         run: |
           cd ib_dir
           
-          # --- 软件包说明 ---
-          # 1. luci-app-turboacc: 包含 FullCone NAT 和 Flow Offload 加速
-          # 2. kmod-tcp-bbr: BBR 拥塞控制内核模块
-          # 3. 驱动大全: 包含 i225/i226/Realtek 等常见网卡驱动
+          # 【重要修正】
+          # 1. 删除了 "custom-scripts"，因为我们现在是直接注入文件，不需要安装包
+          # 2. 保留了其他所有官方驱动和配置
           
-          make image PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=1024 PACKAGES="custom-scripts \
+          make image PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=1024 PACKAGES=" \
           parted resize2fs \
           luci-theme-argon luci-app-package-manager default-settings-chn \
+          -dnsmasq dnsmasq-full \
           luci-app-turboacc include-pdnsd-ipv6 \
           kmod-tcp-bbr \
-          -dnsmasq dnsmasq-full \
           kmod-nft-offload kmod-nft-tproxy kmod-sched-core kmod-sched-cake \
           kmod-crypto-cbc kmod-crypto-ctr kmod-hwmon-core kmod-i2c-core \
           rsync curl htop \
