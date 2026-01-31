@@ -5,13 +5,10 @@ on:
     - cron: '0 16 * * *'
 
 env:
-  # IB 下载源设置
   IB_REPO: sixleaves/buildOP4Six
   IB_TAG: IB-latest
-  # 固件基本信息
   FIRMWARE_NAME: immortalwrt
   TZ: Asia/Shanghai
-  # 自定义文件目录
   DIY_FILES: files/x86-64/files
 
 jobs:
@@ -27,10 +24,8 @@ jobs:
       - name: 2. 获取上游版本信息
         id: get_version
         run: |
-          # 获取 ImmortalWrt 官方最新 Tag 作为版本号参考
           TAGS=$(curl -s https://api.github.com/repos/immortalwrt/immortalwrt/tags | jq -r '.[].name')
           LATEST_STABLE=$(echo "$TAGS" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -rV | head -n1)
-          
           if [ -z "$LATEST_STABLE" ]; then
             echo "MAIN_VERSION=24.10-SNAPSHOT" >> $GITHUB_ENV
             echo "REPO_BRANCH=openwrt-24.10" >> $GITHUB_ENV
@@ -51,8 +46,6 @@ jobs:
       - name: 4. 下载并解压 ImageBuilder
         run: |
           echo "正在从 $IB_REPO 下载 ImageBuilder..."
-          
-          # 使用 GitHub API 获取 release 资源列表
           ASSET_URL=$(curl -s "https://api.github.com/repos/${{ env.IB_REPO }}/releases/tags/${{ env.IB_TAG }}" | jq -r '.assets[] | select(.name | contains("immortalwrt-imagebuilder-x86-64")) | .browser_download_url' | head -n 1)
           
           if [ -z "$ASSET_URL" ]; then
@@ -60,55 +53,67 @@ jobs:
             exit 1
           fi
           
-          echo "Downloading from: $ASSET_URL"
           wget -q "$ASSET_URL" -O ib.tar.zst
-          
-          echo "Extracting..."
           tar -I zstd -xf ib.tar.zst
           rm ib.tar.zst
-          
-          # 将解压出来的目录重命名为 ib_dir
           mv immortalwrt-imagebuilder-* ib_dir
           
           if [ ! -d "ib_dir" ]; then
-             echo "Error: Extraction failed or directory mismatch."
+             echo "Error: Extraction failed."
              exit 1
           fi
 
       - name: 5. 注入自动扩容脚本与自定义配置
         run: |
-          # --- 生成自动扩容脚本 (UCI Defaults) ---
+          # --- 核心：生成自动扩容脚本 (Fdisk 版) ---
+          # 既然源里没有 parted，我们用 fdisk 实现同样的功能
           mkdir -p ib_dir/files/etc/uci-defaults
           
           cat << 'EOF' > ib_dir/files/etc/uci-defaults/99-resize-rootfs
           #!/bin/sh
           
-          # 1. 找到主硬盘 (优先匹配 sdX, 其次 mmcblk0)
-          disk=$(parted -l 2>/dev/null | grep -o '/dev/sd[a-z]' | head -n 1)
+          # 1. 找到主硬盘
+          disk=$(ls /dev/sd[a-z] 2>/dev/null | head -n 1)
           [ -z "$disk" ] && disk="/dev/mmcblk0"
-          
-          # 如果找不到硬盘，退出
           [ -z "$disk" ] && exit 0
           
-          # 2. 获取最后一个分区的编号
-          part_num=$(parted "$disk" -ms unit s print | tail -n 1 | cut -f 1 -d:)
+          # 2. 这里的逻辑是：扩容最后一个分区
+          # 使用 fdisk 获取分区信息，或者直接尝试扩容最后一个
+          # 下面的命令序列含义：
+          # d: 删除分区
+          # (默认回车): 选择最后一个分区
+          # n: 新建分区
+          # (默认回车): 选择分区号
+          # (默认回车): 起始扇区默认（原位置）
+          # (默认回车): 结束扇区默认（最大）
+          # w: 写入
+          # N: 如果询问是否移除签名，回答 No (保留数据头)
           
-          # 3. 扩容该分区到 100%
-          parted "$disk" -s resizepart "$part_num" 100%
+          echo -e "d\n\nn\n\n\n\nN\nw" | fdisk "$disk" > /dev/null 2>&1
           
-          # 4. 尝试扩容文件系统 (兼容 ext4)
-          # 注意：OpenWrt 的 rootfs 扩容通常在重启后生效，这里作为双重保险
-          resize2fs "${disk}${part_num}" 2>/dev/null || resize2fs "${disk}p${part_num}" 2>/dev/null
+          # 3. 重新读取分区表
+          partprobe "$disk" 2>/dev/null
           
-          # 5. 删除自身，防止重复运行
+          # 4. 获取最后一个分区名用于 resize
+          # 兼容 /dev/sda2 和 /dev/mmcblk0p2 两种格式
+          if echo "$disk" | grep -q "mmcblk"; then
+            part_num=$(fdisk -l "$disk" | tail -n 1 | awk '{print $1}' | sed 's/.*p//')
+            target="${disk}p${part_num}"
+          else
+            part_num=$(fdisk -l "$disk" | tail -n 1 | awk '{print $1}' | sed 's/.*[a-z]//')
+            target="${disk}${part_num}"
+          fi
+          
+          # 5. 扩容文件系统 (需要 e2fsprogs 包)
+          resize2fs "$target" 2>/dev/null
+          
+          # 6. 删除自身并重启
           rm -f /etc/uci-defaults/99-resize-rootfs
-          
-          # 6. 重启以让分区表变更生效
           reboot
           EOF
           
           chmod +x ib_dir/files/etc/uci-defaults/99-resize-rootfs
-          echo "自动扩容脚本已注入。"
+          echo "自动扩容脚本 (Fdisk版) 已注入。"
           
           # --- 注入用户自定义文件 ---
           if [ -d "${{ env.DIY_FILES }}" ]; then
@@ -124,15 +129,15 @@ jobs:
           echo -e "$(nproc) thread compile"
           
           # ---------------------------------------------------------------------
-          # 核心修复说明：
-          # 1. 添加 "-dnsmasq"：必须先移除标准版，才能安装 dnsmasq-full
-          # 2. 添加 "-kmod-ixgbevf"：根据你的注释要求，显式移除该驱动
-          # 3. 移除了 libc, libgcc, base-files 等基础包（ImageBuilder 默认会带，无需重复声明）
+          # 关键修改点：
+          # 1. 移除了 parted, losetup, resize2fs (这些名字在源里找不到)
+          # 2. 添加了 e2fsprogs (它包含 resize2fs 命令，这是必须的)
+          # 3. fdisk 通常包含在 base-files 或 busybox 中，为了保险也可以不写，或者写 fdisk
           # ---------------------------------------------------------------------
           
-          make image V=s PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=1024 PACKAGES="custom-scripts \
-          parted losetup resize2fs \
+          make image PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=1024 PACKAGES="custom-scripts \
           -dnsmasq dnsmasq-full \
+          e2fsprogs \
           autocore automount default-settings-chn dropbear fdisk firewall4 fstools \
           kmod-button-hotplug kmod-nft-offload libustream-openssl logd luci-app-package-manager luci-compat luci-lib-base luci-lib-ipkg luci-light \
           netifd nftables odhcp6c odhcpd-ipv6only opkg partx-utils ppp ppp-mod-pppoe procd-ujail uci kmod-nf-nathelper \
@@ -155,8 +160,8 @@ jobs:
           echo "RELEASE_BODY<<EOF" >> $GITHUB_ENV
           echo "## ImmortalWrt x86-64 固件发布" >> $GITHUB_ENV
           echo "### 固件特性" >> $GITHUB_ENV
-          echo "- **自动扩容**: 首次启动后自动扩展以利用所有磁盘空间" >> $GITHUB_ENV
-          echo "- **DNS组件**: 替换为 dnsmasq-full (支持更多过滤规则)" >> $GITHUB_ENV
+          echo "- **自动扩容**: 首次启动后自动扩展 (Fdisk版)" >> $GITHUB_ENV
+          echo "- **DNS组件**: dnsmasq-full" >> $GITHUB_ENV
           echo "- **内核版本**: ${{ env.REPO_BRANCH }}" >> $GITHUB_ENV
           echo "- **构建时间**: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
           echo "### 默认配置" >> $GITHUB_ENV
