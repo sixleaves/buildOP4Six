@@ -86,12 +86,12 @@ jobs:
 
       - name: 6.加载配置文件
         run: |
-          ls -l $CONFIG_FILE || echo "Config file not found"
-          ls -l $CONFIG_FILE
-          if [ -e $CONFIG_FILE ]; then
-            cp -rf $CONFIG_FILE /workdir/$REPO_NAME/
-            ls /workdir/$REPO_NAME/
-            mv /workdir/$REPO_NAME/$CONFIG_FILE /workdir/$REPO_NAME/.config
+          # 检查原始配置文件是否存在
+          if [ -f "$CONFIG_FILE" ]; then
+            echo "Found config file: $CONFIG_FILE"
+            # 直接复制到目标目录并重命名为 .config
+            cp "$CONFIG_FILE" "/workdir/$REPO_NAME/.config"
+            echo "Config file copied to .config successfully."
           else
             echo "Config file $CONFIG_FILE not found. Exiting..."
             exit 1
