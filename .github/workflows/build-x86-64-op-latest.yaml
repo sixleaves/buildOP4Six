@@ -5,13 +5,13 @@ on:
     - cron: '0 16 * * *'
 
 env:
-  # IB 下载源设置 (来自 sixleaves/buildOP4Six)
+  # IB 下载源设置
   IB_REPO: sixleaves/buildOP4Six
   IB_TAG: IB-latest
   # 固件基本信息
   FIRMWARE_NAME: immortalwrt
   TZ: Asia/Shanghai
-  # 自定义文件目录 (如果你仓库里有这个目录，里面的内容会被复制到固件根目录)
+  # 自定义文件目录
   DIY_FILES: files/x86-64/files
 
 jobs:
@@ -46,14 +46,12 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt update
-          # 增加 zstd 用于解压新版 IB，增加 parted 用于生成扩容脚本时的调试
           sudo apt install -y build-essential libncurses-dev zlib1g-dev gawk git gettext libssl-dev xsltproc rsync wget unzip python3 zstd parted
 
       - name: 4. 下载并解压 ImageBuilder
         run: |
           echo "正在从 $IB_REPO 下载 ImageBuilder..."
           
-          # 模糊匹配下载 URL，因为文件名可能会变
           # 使用 GitHub API 获取 release 资源列表
           ASSET_URL=$(curl -s "https://api.github.com/repos/${{ env.IB_REPO }}/releases/tags/${{ env.IB_TAG }}" | jq -r '.assets[] | select(.name | contains("immortalwrt-imagebuilder-x86-64")) | .browser_download_url' | head -n 1)
           
@@ -65,15 +63,13 @@ jobs:
           echo "Downloading from: $ASSET_URL"
           wget -q "$ASSET_URL" -O ib.tar.zst
           
-          # 解压
           echo "Extracting..."
           tar -I zstd -xf ib.tar.zst
           rm ib.tar.zst
           
-          # 将解压出来的目录重命名为 ib_dir，方便后续操作
+          # 将解压出来的目录重命名为 ib_dir
           mv immortalwrt-imagebuilder-* ib_dir
           
-          # 验证是否解压成功
           if [ ! -d "ib_dir" ]; then
              echo "Error: Extraction failed or directory mismatch."
              exit 1
@@ -81,14 +77,13 @@ jobs:
 
       - name: 5. 注入自动扩容脚本与自定义配置
         run: |
-          # --- 核心：生成自动扩容脚本 (UCI Defaults) ---
-          # 该脚本会在固件首次启动时运行，扩容分区并重启
+          # --- 生成自动扩容脚本 (UCI Defaults) ---
           mkdir -p ib_dir/files/etc/uci-defaults
           
           cat << 'EOF' > ib_dir/files/etc/uci-defaults/99-resize-rootfs
           #!/bin/sh
           
-          # 1. 找到主硬盘 (通常是 sdX 或 mmcblk0)
+          # 1. 找到主硬盘 (优先匹配 sdX, 其次 mmcblk0)
           disk=$(parted -l 2>/dev/null | grep -o '/dev/sd[a-z]' | head -n 1)
           [ -z "$disk" ] && disk="/dev/mmcblk0"
           
@@ -115,7 +110,7 @@ jobs:
           chmod +x ib_dir/files/etc/uci-defaults/99-resize-rootfs
           echo "自动扩容脚本已注入。"
           
-          # --- 注入用户自定义文件 (如果有) ---
+          # --- 注入用户自定义文件 ---
           if [ -d "${{ env.DIY_FILES }}" ]; then
             echo "Copying custom files from ${{ env.DIY_FILES }}..."
             cp -r ${{ env.DIY_FILES }}/* ib_dir/files/
@@ -128,23 +123,24 @@ jobs:
           cd ib_dir
           echo -e "$(nproc) thread compile"
           
-          # --- 构建命令说明 ---
-          # ROOTFS_PARTSIZE=1024: 初始根分区大小设为 1GB (下载快)，刷入后会自动扩容。
-          # PACKAGES: 
-          #   1. 必须包含: parted losetup resize2fs (用于扩容)
-          #   2. 已移除: -kmod-ixgbevf (防止冲突)
+          # ---------------------------------------------------------------------
+          # 核心修复说明：
+          # 1. 添加 "-dnsmasq"：必须先移除标准版，才能安装 dnsmasq-full
+          # 2. 添加 "-kmod-ixgbevf"：根据你的注释要求，显式移除该驱动
+          # 3. 移除了 libc, libgcc, base-files 等基础包（ImageBuilder 默认会带，无需重复声明）
+          # ---------------------------------------------------------------------
           
           make image PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=1024 PACKAGES="custom-scripts \
           parted losetup resize2fs \
-          autocore automount base-files block-mount ca-bundle ca-certificates default-settings-chn dnsmasq-full dropbear fdisk firewall4 fstools \
-          kmod-button-hotplug kmod-nft-offload libc libgcc libustream-openssl logd luci-app-package-manager luci-compat luci-lib-base luci-lib-ipkg luci-light \
+          -dnsmasq dnsmasq-full \
+          autocore automount default-settings-chn dropbear fdisk firewall4 fstools \
+          kmod-button-hotplug kmod-nft-offload libustream-openssl logd luci-app-package-manager luci-compat luci-lib-base luci-lib-ipkg luci-light \
           netifd nftables odhcp6c odhcpd-ipv6only opkg partx-utils ppp ppp-mod-pppoe procd-ujail uci kmod-nf-nathelper \
           uclient-fetch urandom-seed urngd kmod-amazon-ena kmod-dwmac-intel kmod-forcedeth kmod-usb-hid i915-firmware-dmc \
           luci-theme-argon kmod-nft-tproxy kmod-sched-core kmod-sched-cake kmod-crypto-cbc kmod-crypto-ctr kmod-ata-ahci kmod-drm-i915 \
           kmod-hwmon-core kmod-i2c-core rsync curl htop kmod-e1000e kmod-i40e kmod-igb \
-          kmod-igbvf kmod-ixgbe kmod-ixgbevf kmod-pcnet32 kmod-tulip kmod-vmxnet3" 
+          kmod-igbvf kmod-ixgbe -kmod-ixgbevf kmod-pcnet32 kmod-tulip kmod-vmxnet3" 
           
-          # 设置时间戳变量
           echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
       - name: 7. 上传构建产物
@@ -160,6 +156,7 @@ jobs:
           echo "## ImmortalWrt x86-64 固件发布" >> $GITHUB_ENV
           echo "### 固件特性" >> $GITHUB_ENV
           echo "- **自动扩容**: 首次启动后自动扩展以利用所有磁盘空间" >> $GITHUB_ENV
+          echo "- **DNS组件**: 替换为 dnsmasq-full (支持更多过滤规则)" >> $GITHUB_ENV
           echo "- **内核版本**: ${{ env.REPO_BRANCH }}" >> $GITHUB_ENV
           echo "- **构建时间**: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
           echo "### 默认配置" >> $GITHUB_ENV
