@@ -80,11 +80,11 @@ jobs:
           rm ib.archive
           mv immortalwrt-imagebuilder-* ib_dir
 
-      - name: 5. 注入自动扩容脚本与自定义配置
+      - name: 5. 注入自动化配置脚本
         run: |
           mkdir -p ib_dir/files/etc/uci-defaults
           
-          # 生成自动扩容脚本
+          # --- 脚本1: 99-resize-rootfs (自动扩容) ---
           cat << 'EOF' > ib_dir/files/etc/uci-defaults/99-resize-rootfs
           #!/bin/sh
           disk=$(parted -l 2>/dev/null | grep -o '/dev/sd[a-z]' | head -n 1)
@@ -98,7 +98,32 @@ jobs:
           EOF
           chmod +x ib_dir/files/etc/uci-defaults/99-resize-rootfs
           
-          # 注入自定义文件
+          # --- 脚本2: 99-custom-settings (性能优化与网络设置) ---
+          cat << 'EOF' > ib_dir/files/etc/uci-defaults/99-custom-settings
+          #!/bin/sh
+          
+          # 1. 开启 BBR 拥塞控制 (提升网络吞吐)
+          echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+          echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+          sysctl -p
+          
+          # 2. 设置默认 LAN IP (防止冲突)
+          uci set network.lan.ipaddr='192.168.31.1'
+          uci commit network
+          
+          # 3. 默认开启 TurboACC (如果安装了的话)
+          # ImmortalWrt 的 TurboACC 默认通常是开启 Flow Offload 的，这里确保一下
+          uci set firewall.@defaults[0].flow_offloading='1'
+          uci set firewall.@defaults[0].flow_offloading_hw='1' 2>/dev/null
+          uci commit firewall
+          
+          # 脚本执行完自动删除
+          rm -f /etc/uci-defaults/99-custom-settings
+          exit 0
+          EOF
+          chmod +x ib_dir/files/etc/uci-defaults/99-custom-settings
+
+          # 注入你的自定义文件 (如果有)
           if [ -d "${{ env.DIY_FILES }}" ]; then
             cp -r ${{ env.DIY_FILES }}/* ib_dir/files/
           fi
@@ -107,9 +132,16 @@ jobs:
         run: |
           cd ib_dir
           
+          # --- 软件包说明 ---
+          # 1. luci-app-turboacc: 包含 FullCone NAT 和 Flow Offload 加速
+          # 2. kmod-tcp-bbr: BBR 拥塞控制内核模块
+          # 3. 驱动大全: 包含 i225/i226/Realtek 等常见网卡驱动
+          
           make image PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=1024 PACKAGES="custom-scripts \
           parted resize2fs \
           luci-theme-argon luci-app-package-manager default-settings-chn \
+          luci-app-turboacc include-pdnsd-ipv6 \
+          kmod-tcp-bbr \
           -dnsmasq dnsmasq-full \
           kmod-nft-offload kmod-nft-tproxy kmod-sched-core kmod-sched-cake \
           kmod-crypto-cbc kmod-crypto-ctr kmod-hwmon-core kmod-i2c-core \
