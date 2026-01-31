@@ -89,16 +89,16 @@ jobs:
         run: |
           cd ib_dir
           make image PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=1024 PACKAGES="custom-scripts \
-          parted losetup resize2fs \
-          luci-theme-argon luci-app-package-manager default-settings-chn \
-          -dnsmasq dnsmasq-full \
-          kmod-nft-offload kmod-nft-tproxy kmod-sched-core kmod-sched-cake \
-          kmod-crypto-cbc kmod-crypto-ctr kmod-hwmon-core kmod-i2c-core \
-          rsync curl htop \
-          kmod-amazon-ena kmod-vmxnet3 kmod-dwmac-intel kmod-forcedeth kmod-r8169 \
-          kmod-e1000e kmod-i40e kmod-igb kmod-igbvf \
-          kmod-ixgbe kmod-ixgbevf kmod-pcnet32 kmod-tulip \
-          kmod-usb-hid kmod-ata-ahci" 
+                    parted losetup resize2fs \
+                    luci-theme-argon luci-app-package-manager default-settings-chn \
+                    -dnsmasq dnsmasq-full \
+                    kmod-nft-offload kmod-nft-tproxy kmod-sched-core kmod-sched-cake \
+                    kmod-crypto-cbc kmod-crypto-ctr kmod-hwmon-core kmod-i2c-core \
+                    rsync curl htop \
+                    kmod-amazon-ena kmod-vmxnet3 kmod-dwmac-intel kmod-forcedeth kmod-r8169 \
+                    kmod-e1000e kmod-i40e kmod-igb kmod-igbvf \
+                    kmod-ixgbe kmod-ixgbevf kmod-pcnet32 kmod-tulip \
+                    kmod-usb-hid kmod-ata-ahci"
           
           # 【关键修正】这里定义唯一的时间变量，格式为 YYYYMMDD
           echo "FILE_DATE=$(date +"%Y%m%d")" >> $GITHUB_ENV
