@@ -21,19 +21,19 @@ jobs:
       - name: 1.获取最新稳定版本
         id: get_version
         run: |
-          # 获取所有标签
-          TAGS=$(curl -s https://api.github.com/repos/immortalwrt/immortalwrt/tags | jq -r '.[].name')
-          # 过滤出最新的稳定版本标签并排序
-          LATEST_STABLE=$(echo "$TAGS" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -rV | head -n1)
-          if [ -z "$LATEST_STABLE" ]; then
-            echo "No stable version found, using default branch"
-            echo "REPO_BRANCH=openwrt-24.10" >> $GITHUB_ENV
+          # 获取所有标签并过滤出正式版本号 (如 v24.10.4)
+          # 排除带 -rc, -beta 的测试版
+          LATEST_TAG=$(curl -s https://api.github.com/repos/immortalwrt/immortalwrt/tags | jq -r '.[].name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -rV | head -n1)
+          
+          if [ -z "$LATEST_TAG" ]; then
+            echo "未找到正式版标签，回退至分支编译"
+            echo "FETCH_TARGET=openwrt-24.10" >> $GITHUB_ENV
+            echo "IS_TAG=false" >> $GITHUB_ENV
           else
-            # 这种方法会保留 v 之后的所有内容，如 24.10.1
-            MAIN_VERSION=$(echo $LATEST_STABLE | sed 's/^v//')
-            echo "MAIN_VERSION=$MAIN_VERSION" >> $GITHUB_ENV   
-            echo "REPO_BRANCH=openwrt-$MAIN_VERSION" >> $GITHUB_ENV
-            echo "Using branch: openwrt-$MAIN_VERSION based on tag $LATEST_STABLE"
+            echo "FETCH_TARGET=$LATEST_TAG" >> $GITHUB_ENV
+            echo "MAIN_VERSION=${LATEST_TAG#v}" >> $GITHUB_ENV
+            echo "IS_TAG=true" >> $GITHUB_ENV
+            echo "Found Tag: $LATEST_TAG"
           fi
 
       - name: 2.下载config配置
@@ -66,8 +66,10 @@ jobs:
         working-directory: /workdir
         run: |
           df -hT $PWD
-          echo "Using branch: $REPO_BRANCH"
-          git clone -b $REPO_BRANCH --single-branch --filter=blob:none $REPO_URL 
+          # 注意这里：如果是 Tag，直接克隆该 Tag
+          echo "Fetching: $FETCH_TARGET"
+          git clone -b $FETCH_TARGET --single-branch --depth=1 $REPO_URL $REPO_NAME
+          
           ln -sf /workdir/$REPO_NAME $GITHUB_WORKSPACE/$REPO_NAME
           cd $REPO_NAME
           ./scripts/feeds update -a
