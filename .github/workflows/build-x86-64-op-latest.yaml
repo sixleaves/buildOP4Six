@@ -144,7 +144,7 @@ jobs:
           uclient-fetch urandom-seed urngd kmod-amazon-ena kmod-dwmac-intel kmod-forcedeth kmod-usb-hid i915-firmware-dmc \
           luci-theme-argon kmod-nft-tproxy kmod-sched-core kmod-sched-cake kmod-crypto-cbc kmod-crypto-ctr kmod-ata-ahci kmod-drm-i915 \
           kmod-hwmon-core kmod-i2c-core rsync curl htop kmod-e1000e kmod-i40e kmod-igb \
-          kmod-igbvf kmod-ixgbe -kmod-ixgbevf kmod-pcnet32 kmod-tulip kmod-vmxnet3" 
+          kmod-igbvf kmod-ixgbe -kmod-ixgbevf kmod-pcnet32 kmod-tulip kmod-vmxnet3 kmod-tcp-bbr" 
           
           echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
