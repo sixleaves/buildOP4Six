@@ -135,7 +135,7 @@ jobs:
           # 3. fdisk 通常包含在 base-files 或 busybox 中，为了保险也可以不写，或者写 fdisk
           # ---------------------------------------------------------------------
           
-          make image PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=10240 PACKAGES="custom-scripts \
+          make image PROFILE="generic" FILES="files" ROOTFS_PARTSIZE=5120 PACKAGES="custom-scripts \
           -dnsmasq dnsmasq-full \
           e2fsprogs \
           autocore automount default-settings-chn dropbear fdisk firewall4 fstools \
