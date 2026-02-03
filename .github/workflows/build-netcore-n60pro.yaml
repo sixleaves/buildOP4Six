@@ -1,8 +1,6 @@
 name: build-netcore-n60pro
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 10 * * *'
 
 env:
   REPO_URL: https://github.com/sixleaves/buildOP4Six/releases/download
