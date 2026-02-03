@@ -30,7 +30,7 @@ jobs:
             echo "MAIN_VERSION=24.10-SNAPSHOT" >> $GITHUB_ENV
             echo "REPO_BRANCH=openwrt-24.10" >> $GITHUB_ENV
           else
-            MAIN_VERSION=$(echo $LATEST_STABLE | sed 's/v\([0-9]\+\.[0-9]\+\).*/\1/')
+            MAIN_VERSION=$(echo $LATEST_STABLE | sed 's/^v//')
             echo "MAIN_VERSION=$MAIN_VERSION" >> $GITHUB_ENV    
             echo "REPO_BRANCH=openwrt-$MAIN_VERSION" >> $GITHUB_ENV
           fi
