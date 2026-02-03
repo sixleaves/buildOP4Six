@@ -103,6 +103,10 @@ jobs:
         run: |
           cd $REPO_NAME
           sed -i 's/192.168.1.1/192.168.31.1/g' package/base-files/files/bin/config_generate
+          # 2. 修改系统初始化脚本，加入 sysctl 参数
+          # 这样刷机后就直接是 BBR 了
+          echo "net.core.default_qdisc=fq" >> package/base-files/files/etc/sysctl.conf
+          echo "net.ipv4.tcp_congestion_control=bbr" >> package/base-files/files/etc/sysctl.conf
 
       - name: 8.修改默认主题
         run: |
