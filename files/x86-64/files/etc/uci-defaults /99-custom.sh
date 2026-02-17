@@ -5,7 +5,7 @@ chmod 777 /usr/bin/*.sh 2>/dev/null
 
 # 设置 /usr/bin/sing-box 的权限为 777
 [ -f "/usr/bin/sing-box" ] && chmod 777 /usr/bin/sing-box
-
+[ -f "/etc/init.d/nft_custom" ] && chmod +x /etc/init.d/nft_custom
 # 创建 /mnt/nas 目录（若不存在）
 mkdir -p /mnt/nas
 # 如果必须确保挂载成功，则需检查设备是否存在
