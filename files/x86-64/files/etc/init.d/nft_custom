@@ -6,7 +6,6 @@ USE_PROCD=1
 start_service() {
     procd_open_instance
     procd_set_param command /bin/sh -c "
-        /usr/sbin/nft -f /etc/sing-box/quic_filter.nft || echo 'Failed to load quic_filter.nft' >> /tmp/nft_error.log
         /usr/sbin/nft -f /etc/sing-box/sec_block.nft || echo 'Failed to load sec_block.nft' >> /tmp/nft_error.log
     "
     procd_set_param stdout 1
