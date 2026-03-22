@@ -59,7 +59,7 @@ jobs:
       - name: 5.自定义固件
         working-directory:
         run: |
-          cp hanwckf/n99-AX6000/mt7986a-netcore-n60.dts /workdir/$REPO_NAME/
+          cp hanwckf/N60Pro/mt7986a-netcore-n60.dts /workdir/$REPO_NAME/
           cd /workdir/$REPO_NAME
           rm /workdir/$REPO_NAME/$DTS_PATH/mt7986a-netcore-n60.dts
           mv mt7986a-netcore-n60.dts $DTS_PATH
