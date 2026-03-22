@@ -56,13 +56,13 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # - name: 5.自定义固件
-      #   working-directory:
-      #   run: |
-      #     cp hanwckf/n99-AX6000/mt7986a-netcore-n60.dts /workdir/$REPO_NAME/
-      #     cd /workdir/$REPO_NAME
-      #     rm /workdir/$REPO_NAME/$DTS_PATH/mt7986a-netcore-n60.dts
-      #     mv mt7986a-netcore-n60.dts $DTS_PATH
+      - name: 5.自定义固件
+        working-directory:
+        run: |
+          cp hanwckf/n99-AX6000/mt7986a-netcore-n60.dts /workdir/$REPO_NAME/
+          cd /workdir/$REPO_NAME
+          rm /workdir/$REPO_NAME/$DTS_PATH/mt7986a-netcore-n60.dts
+          mv mt7986a-netcore-n60.dts $DTS_PATH
 
       - name: 6.加载配置文件
         run: |
