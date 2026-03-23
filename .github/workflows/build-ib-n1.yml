@@ -1,4 +1,4 @@
-name: build-n1-ib
+name: build-ib-n1
 
 on:
   workflow_dispatch:
@@ -84,11 +84,22 @@ jobs:
         uses: P3TERX/ssh2actions@main
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.ssh == 'true'
 
-      - name: Build ImageBuilder
+      - name: Build OpenWrt & ImageBuilder
         run: |
           cd "$REPO_NAME"
-          echo -e "$(nproc) thread compile imagebuilder"
-          make -j$(( $(nproc) + 1 )) imagebuilder V=s
+          echo -e "$(nproc) thread compile"
+          if make -j"$(nproc)"; then
+            echo "Full compile finished."
+          else
+            echo "Full compile failed, continue to ensure ImageBuilder is generated."
+          fi
+
+          if find bin/targets -maxdepth 4 -type f -name '*imagebuilder*.tar.*' | grep -q .; then
+            echo "ImageBuilder already generated in full compile."
+          else
+            echo "ImageBuilder not found, fallback to target/imagebuilder/compile"
+            make -j$(( $(nproc) + 1 )) target/imagebuilder/compile V=s
+          fi
 
       - name: Collect ImageBuilder artifact
         run: |
