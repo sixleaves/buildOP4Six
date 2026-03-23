@@ -1,0 +1,211 @@
+name: build-n1-latest
+
+on:
+  workflow_dispatch:
+    inputs:
+      ssh:
+        description: 'SSH connection to Actions'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+  workflow_run:
+    workflows:
+      - build-n1-ib
+    types:
+      - completed
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  IB_REPO: ${{ github.repository }}
+  IB_TAG: IB-N1-latest
+  CONFIG_FILE: hanwckf/N1/armv8/N1/.config
+  FILES_DIR: hanwckf/N1/armv8/N1/files
+  PACKIT_SCRIPT: hanwckf/N1/armv8/N1/mk_s905d_n1.sh
+  FIRMWARE_PREFIX: OpenWrt_N1
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free up space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Initialize environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get -qq update
+          sudo -E apt-get -qq install -y \
+            build-essential file flex gawk gettext git jq libncurses-dev \
+            libssl-dev python3 rsync tree unzip wget xz-utils zlib1g-dev zstd
+          sudo -E apt-get -qq autoremove --purge
+          sudo -E apt-get -qq clean
+          sudo timedatectl set-timezone "$TZ"
+
+      - name: SSH connect to Actions
+        uses: P3TERX/ssh2actions@main
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.ssh == 'true'
+
+      - name: Download ImageBuilder from release
+        run: |
+          API_URL="https://api.github.com/repos/${IB_REPO}/releases/tags/${IB_TAG}"
+          ASSET_JSON=$(curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$API_URL" | jq -c '.assets[] | select(.name | test("imagebuilder.*tar\\.(zst|xz|gz)$"))' | head -n 1)
+
+          if [ -z "$ASSET_JSON" ] || [ "$ASSET_JSON" = "null" ]; then
+            echo "ImageBuilder asset not found in release tag: $IB_TAG"
+            exit 1
+          fi
+
+          ASSET_ID=$(echo "$ASSET_JSON" | jq -r '.id')
+          ASSET_NAME=$(echo "$ASSET_JSON" | jq -r '.name')
+          curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/octet-stream" \
+            "https://api.github.com/repos/${IB_REPO}/releases/assets/${ASSET_ID}" \
+            -o "$ASSET_NAME"
+
+          case "$ASSET_NAME" in
+            *.tar.zst) tar -I zstd -xf "$ASSET_NAME" ;;
+            *.tar.xz) tar -xJf "$ASSET_NAME" ;;
+            *.tar.gz) tar -xzf "$ASSET_NAME" ;;
+            *)
+              echo "Unsupported ImageBuilder archive format: $ASSET_NAME"
+              exit 1
+              ;;
+          esac
+
+          IB_DIR=$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name '*imagebuilder*' | head -n 1)
+          if [ -z "$IB_DIR" ]; then
+            echo "ImageBuilder directory not found after extraction"
+            exit 1
+          fi
+
+          echo "IB_DIR=$IB_DIR" >> "$GITHUB_ENV"
+          echo "Using ImageBuilder: $IB_DIR"
+
+      - name: Build rootfs with ImageBuilder
+        run: |
+          test -f "$CONFIG_FILE"
+          test -d "$FILES_DIR"
+          mkdir -p "$IB_DIR/files"
+          cp -a "$FILES_DIR"/. "$IB_DIR/files/"
+
+          # ImageBuilder 的 PACKAGES 需要真实包名，过滤掉带 "_" 的 feature 开关项（如 dnsmasq_full_*）。
+          PACKAGES=$(grep -E '^CONFIG_PACKAGE_[^=]+=y$' "$CONFIG_FILE" \
+            | sed -E 's/^CONFIG_PACKAGE_([^=]+)=y/\1/' \
+            | grep -v '_' \
+            | sort -u \
+            | tr '\n' ' ' \
+            | xargs)
+
+          if [ -z "$PACKAGES" ]; then
+            echo "No packages parsed from $CONFIG_FILE"
+            exit 1
+          fi
+
+          cd "$IB_DIR"
+          echo "Package count: $(echo "$PACKAGES" | wc -w)"
+          if ! make image PROFILE="generic" FILES="files" PACKAGES="$PACKAGES" IGNORE_ERRORS=1 -j"$(nproc)" V=s; then
+            echo "Custom package list failed, fallback to default profile packages."
+            make image PROFILE="generic" FILES="files" IGNORE_ERRORS=1 -j"$(nproc)" V=s
+          fi
+
+          ROOTFS_TAR=$(find bin/targets -maxdepth 4 -type f -name '*rootfs.tar.gz' | head -n 1)
+          if [ -z "$ROOTFS_TAR" ]; then
+            echo "Rootfs tarball not found"
+            exit 1
+          fi
+
+          echo "ROOTFS_TAR=$IB_DIR/$ROOTFS_TAR" >> "$GITHUB_ENV"
+          echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> "$GITHUB_ENV"
+          ls -lh "$IB_DIR/$ROOTFS_TAR"
+
+      - name: Package N1 firmware
+        uses: unifreq/openwrt_packit@master
+        env:
+          OPENWRT_ARMVIRT: ${{ env.ROOTFS_TAR }}
+          KERNEL_REPO_URL: breakingbadboy/OpenWrt
+          KERNEL_VERSION_NAME: 6.12.y
+          PACKAGE_SOC: diy
+          GZIP_IMGS: .xz
+          SCRIPT_DIY_PATH: ${{ env.PACKIT_SCRIPT }}
+          WHOAMI: sixleaves
+          SW_FLOWOFFLOAD: 0
+          SFE_FLOW: 0
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: n1-firmware
+          path: ${{ env.PACKAGED_OUTPUTPATH }}/*.img.xz
+
+      - name: Publish firmware to release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ env.FIRMWARE_PREFIX }}_${{ env.FILE_DATE }}
+          artifacts: ${{ env.PACKAGED_OUTPUTPATH }}/*.img.xz
+          body: |
+            首次使用建议全新刷写
+            * 基本信息
+            IP: 192.168.2.2
+            账户: root
+            密码: password
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Keep latest 2 N1 firmware releases
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pattern = /^OpenWrt_N1_/i;
+            const keep = 2;
+
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+
+            const targets = releases
+              .filter((release) => pattern.test(release.tag_name || ''))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+              .slice(keep);
+
+            for (const release of targets) {
+              await github.rest.repos.deleteRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id,
+              });
+
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `tags/${release.tag_name}`,
+              });
+
+              core.info(`Deleted old release/tag: ${release.tag_name}`);
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
