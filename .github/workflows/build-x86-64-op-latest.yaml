@@ -141,10 +141,10 @@ jobs:
             -dnsmasq dnsmasq-full -ip -ip-tiny ip-full -jq jq-full \
             kmod-amazon-ena kmod-dwmac-intel kmod-e1000e kmod-forcedeth kmod-i40e kmod-igb kmod-igbvf kmod-ixgbe -kmod-ixgbevf kmod-pcnet32 kmod-tulip kmod-vmxnet3 kmod-button-hotplug kmod-usb-hid kmod-ata-ahci kmod-hwmon-core kmod-i2c-core i915-firmware-dmc kmod-drm-i915 \
             kmod-crypto-cbc kmod-crypto-ctr kmod-sched-core kmod-sched-cake kmod-tcp-bbr kmod-nf-nathelper kmod-nft-offload \
-            kmod-inet-diag kmod-netlink-diag kmod-nft-socket kmod-nft-tproxy kmod-tun ca-bundle ca-certificates \
+            kmod-nft-tproxy kmod-tun ca-bundle ca-certificates \
             rsync curl htop ethtool zsh \
             luci-theme-argon custom-scripts"
-          
+          # kmod-inet-diag kmod-netlink-diag kmod-nft-socket  这三个内核模块会导致singbox和tailscale冲突
           echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
       - name: 7. 上传构建产物
